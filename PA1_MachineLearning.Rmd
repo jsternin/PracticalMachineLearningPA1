@@ -1,0 +1,109 @@
+---
+title: "ProcticalMachineLearning"
+author: "Jeff Sternin"
+date: "February 12, 2018"
+output: html_document
+---
+```{r lib,echo=FALSE,include=FALSE}
+library(caret);
+```
+## **Practical Machine Learning. Weight Lifting Exercise quality classification and prediction **
+
+### **1. Summary**  
+
+This assignement is example Machine Learning for classification/prediction of the quality of physical exercises.
+We use two data sets - training and testing from [here](http://groupware.les.inf.puc-rio.br/har)
+We train on prediction of $classe$ variable which consistes on 6 values (A-F). We download and clean data sets of
+predictors that are irrelevant or consist only of missing values in testing set. We find the method with highest 
+accuracy for validation set and use train control to achieve it. Apply resulting model for test prediction and
+show graph of most important predictors.
+
+### **2. Getting and cleaning data**  
+
+```{r get_data,echo=TRUE,include=TRUE}
+wd <- normalizePath(getwd(),winslash='\\',mustWork = NA) #getting data
+localFileTraining <- paste0(wd,"\\pml-training.csv")
+localFileTesting <- paste0(wd,"\\pml-testing.csv")
+fileUrl1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv?accessType = DOWNLOAD"
+download.file(fileUrl1,destfile = localFileTraining,mode = "wb") 
+fileUrl2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv?accessType = DOWNLOAD"
+download.file(fileUrl2,destfile = localFileTesting,mode = "wb") 
+```
+
+```{r local_data,echo=TRUE,include=TRUE}
+train <- read.table(localFileTraining,sep=",",header=TRUE) 
+test <- read.table(localFileTesting,sep=",",header=TRUE)
+print(sprintf("Rows in train: %d, test:%d, Columns(predictors):%d",
+      dim(train)[[1]],dim(test)[[1]],dim(train)[[2]]))
+```
+
+Now we have two files: train and test. Test has a 20 records and a lot of missing values.
+Let's check which colums has missing values only.
+Also we notice that first 7 colums of training files have irrelevant data. We get rid of tese colums.
+
+```{r clean_data,echo=TRUE,include=TRUE}
+train <- train[,-(1:7)];test <- test[,-(1:7)] ## remove first columns; count number of NA in colums
+countna <- function (arr) { x = c(NULL); for(i in 1:ncol(arr)) { x <- c(x,sum(is.na(arr[,i]))) } 
+            x;}
+numb_na <- countna(test); # this is array of numbers of NA in each column; leave only columns where no na in test file
+train <- train[,numb_na==0] ;test <- test[,numb_na==0]
+print(sprintf("Rows/NAs in train: %d/%d, test:%d/%d, predictors:%d", 
+    dim(train)[[1]],sum(countna(train)),dim(test)[[1]],sum(countna(test)),dim(train)[[2]]-1));  
+```
+Now number of predictors (columns) is reduced - we use only 52 predictors and no missing values for classification.
+
+### **3. Preprocessing data and initial classification try** 
+
+```{r prepare_classifications,echo=TRUE,include=TRUE}
+set.seed(201811)
+inTrain <- createDataPartition(y=train$classe, p=0.7, list=FALSE)
+val <- train[-inTrain,]
+train <- train[inTrain,]
+print(sprintf("Rows in sets - train:%d, validation (val):%d, test:%d, Columns (Pedictors):%d ",
+      dim(train)[[1]],dim(val)[[1]],dim(test)[[1]],dim(train)[[2]]-1))
+model_rpart <- caret::train(classe ~ ., method = "rpart",data = train)
+pred_rpart_val <- predict(model_rpart,val)   
+print(sprintf("Accuracy of rpart (recursive partition) on validation (out-off-sample) set: %f ",
+  confusionMatrix(pred_rpart_val, val$classe)$overall[["Accuracy"]]))
+```
+We use recursive partition as initial start - Accuracy is very low = 0.5.
+Now try Random forest with train control.
+
+### **4. Classification with Random Forest and results** 
+
+We try Random Forrest with train control. We use cross validtion option (cv) and train array is split into 3 subarrays for
+cross validation. 
+
+```{r randomForrest_classifications,echo=TRUE,include=TRUE,fig.height=6,fig.width=6}
+set.seed(201811)
+system.time(model_rf <- caret::train(classe ~ ., method = "rf",data = train, importance = T, 
+                     trControl = trainControl(method = "cv", number = 3))) ##,verboseIter = TRUE
+pred_rf_val <- predict(model_rf,val)   
+confusionMatrix(pred_rf_val, val$classe)
+print(sprintf("Accuracy of rf (random forest) on validation set: %f ", 
+              confusionMatrix(pred_rf_val, val$classe)$overall[["Accuracy"]]))
+plot(varImp(model_rf) , main = "Importance of Top 10 predictors", top = 10)# Top 10 plot
+predict(model_rf,test)
+```
+We see that accuracy of random forest classification on validation (out-of-sample) set is high 0.9923534.
+There's no need to use multiple methods to improve it. Training control use crossvaldation method splitting training set into 3 files. We plot 20 most important factors in each of 6 classes.
+
+### **5. Conclusion**   
+
+1. Random forest with train control provides very good accuracy on validation (out-of-sample) set and correct results on test set.
+
+2. Other methods like (rpart, lda) - have much lower accuracy of prediction on out-of-sample (val) set (0.5-0.7) 
+
+```{r other_classifications,echo=TRUE,include=TRUE}
+# model_lda <- caret::train(classe ~ ., method = "lda",data = train)
+# confusionMatrix(pred_lda_val, val$classe)$overall[["Accuracy"]]
+# [1] 0.7059543
+```
+
+3. Using trainControl for random forest greatly reduces training time - without it training time almost much higher. 
+
+```{r rf_without_train_control,echo=TRUE,include=TRUE}
+# system.time(model_rf1 <- train(classe ~ ., method = "rf",data = train))
+#    user  system elapsed 
+# 4954.83    9.88 5807.16 
+```
